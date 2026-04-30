@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Replay – Floor Map</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: #080a12; width: 100vw; height: 100vh; overflow: hidden; font-family: "SF Mono", monospace; }
+#statusbar { position: fixed; top: 0; left: 0; right: 0; height: 38px; background: rgba(8,10,18,0.95); backdrop-filter: blur(10px); border-bottom: 1px solid #1a1d2e; display: flex; align-items: center; gap: 14px; padding: 0 18px; z-index: 100; font-size: 11px; }
+.title { font-size: 12px; font-weight: bold; letter-spacing: .12em; text-transform: uppercase; background: linear-gradient(90deg, #e8c87a, #f5e6b0, #e8c87a); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+.subtitle { color: #2a3050; font-size: 11px; }
+#live-dot { width: 7px; height: 7px; border-radius: 50%; background: #ff4444; transition: all .3s; }
+#live-dot.on { background: #4dfa90; box-shadow: 0 0 6px #4dfa90; }
+#live-label { font-size: 11px; color: #404870; }
+.spacer { flex: 1; }
+#badge-count { font-size: 11px; color: #e8c87a; }
+#table-count { font-size: 11px; color: #2a3860; }
+#map-wrap { position: fixed; top: 38px; left: 0; right: 0; bottom: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; background: #080a12; }
+#map-root { position: relative; }
+#map-root img { display: block; width: 100%; height: 100%; user-select: none; pointer-events: none; opacity: 0.85; }
+#dot-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
+.table-marker { position: absolute; transform: translate(-50%, -50%); cursor: default; }
+.table-rect { width: 20px; height: 14px; border-radius: 3px; background: rgba(40,50,100,0.5); border: 1px solid rgba(100,120,220,0.4); }
+.table-label { position: absolute; top: -18px; left: 50%; transform: translateX(-50%); font-size: 9px; color: rgba(100,120,220,0.7); white-space: nowrap; pointer-events: none; opacity: 0; transition: opacity .15s; }
+.table-marker:hover .table-label { opacity: 1; }
+.badge-dot { position: absolute; transform: translate(-50%, -50%); pointer-events: all; cursor: pointer; }
+.badge-star { font-size: 18px; line-height: 1; animation: starglow 2s ease-in-out infinite; filter: drop-shadow(0 0 6px #e8c87a); user-select: none; }
+@keyframes starglow { 0%,100% { filter: drop-shadow(0 0 4px #e8c87a) brightness(1); } 50% { filter: drop-shadow(0 0 12px #f5e6b0) brightness(1.3); } }
+.badge-label { position: absolute; top: -20px; left: 50%; transform: translateX(-50%); background: rgba(8,10,18,0.92); border: 1px solid rgba(232,200,122,0.3); color: #e8c87a; font-size: 10px; padding: 1px 6px; border-radius: 3px; white-space: nowrap; pointer-events: none; }
+#legend { position: fixed; bottom: 16px; right: 16px; background: rgba(8,10,18,0.92); border: 1px solid #1a1d2e; border-radius: 6px; padding: 10px 14px; z-index: 100; display: flex; flex-direction: column; gap: 7px; }
+.leg-row { display: flex; align-items: center; gap: 8px; font-size: 11px; color: #303560; }
+.leg-table { width: 14px; height: 10px; border-radius: 2px; background: rgba(40,50,100,.5); border: 1px solid rgba(100,120,220,.4); flex-shrink: 0; }
+#coord-tip { position: fixed; background: #0d0f1e; border: 1px solid #2d3a70; color: #7090ff; font-size: 11px; padding: 4px 10px; border-radius: 4px; pointer-events: none; z-index: 200; display: none; font-family: monospace; }
+</style>
+</head>
+<body>
+
+<div id="statusbar">
+  <span class="title">★ Replay</span>
+  <span class="subtitle">Moscone South · Level 00</span>
+  <div id="live-dot"></div>
+  <span id="live-label">connecting…</span>
+  <div class="spacer"></div>
+  <span id="table-count">17 tables</span>
+  <span id="badge-count">0 badges</span>
+</div>
+
+<div id="map-wrap">
+  <div id="map-root">
+    <img id="mapimg" alt="floor map" />
+    <div id="dot-layer"></div>
+  </div>
+</div>
+
+<div id="legend">
+  <div class="leg-row"><div class="leg-table"></div>Table (fixed)</div>
+  <div class="leg-row"><span style="font-size:13px;line-height:1;color:#e8c87a">★</span><span style="color:#e8c87a;margin-left:2px">Badge (live)</span></div>
+</div>
+
+<div id="coord-tip"></div>
+
+<script>
+const TABLES = [
+  { id: "table-1",  x: 923,  y: 454  },
+  { id: "table-2",  x: 923,  y: 656  },
+  { id: "table-3",  x: 923,  y: 732  },
+  { id: "table-4",  x: 753,  y: 451  },
+  { id: "table-5",  x: 753,  y: 530  },
+  { id: "table-6",  x: 753,  y: 656  },
+  { id: "table-7",  x: 753,  y: 727  },
+  { id: "table-8",  x: 923,  y: 1026 },
+  { id: "table-9",  x: 923,  y: 1100 },
+  { id: "table-10", x: 923,  y: 1158 },
+  { id: "table-11", x: 923,  y: 1214 },
+  { id: "table-12", x: 923,  y: 1287 },
+  { id: "table-13", x: 855,  y: 1287 },
+  { id: "table-14", x: 923,  y: 1320 },
+  { id: "table-15", x: 1091, y: 1026 },
+  { id: "table-16", x: 1091, y: 1097 },
+  { id: "table-17", x: 1091, y: 1156 },
+];
+
+let badges = [];
+let naturalW = 0, naturalH = 0;
+
+const mapImg = document.getElementById("mapimg");
+mapImg.src = "http://localhost:5000/map.png";
+mapImg.onload = () => {
+  naturalW = mapImg.naturalWidth;
+  naturalH = mapImg.naturalHeight;
+  fitMap();
+};
+window.addEventListener("resize", () => { fitMap(); render(); });
+
+function fitMap() {
+  if (!naturalW) return;
+  const wrap = document.getElementById("map-wrap");
+  const root = document.getElementById("map-root");
+  const ratio = naturalW / naturalH;
+  let w = wrap.clientWidth;
+  let h = w / ratio;
+  if (h > wrap.clientHeight) { h = wrap.clientHeight; w = h * ratio; }
+  root.style.width  = w + "px";
+  root.style.height = h + "px";
+  render();
+}
+
+function scale(px, py) {
+  const root = document.getElementById("map-root");
+  return {
+    x: px / naturalW * root.clientWidth,
+    y: py / naturalH * root.clientHeight
+  };
+}
+
+function render() {
+  if (!naturalW) return;
+  const layer = document.getElementById("dot-layer");
+  layer.innerHTML = "";
+
+  TABLES.forEach(t => {
+    const pos = scale(t.x, t.y);
+    const el  = document.createElement("div");
+    el.className  = "table-marker";
+    el.style.left = pos.x + "px";
+    el.style.top  = pos.y + "px";
+    const rect = document.createElement("div");
+    rect.className = "table-rect";
+    const lbl = document.createElement("div");
+    lbl.className  = "table-label";
+    lbl.textContent = t.id;
+    el.appendChild(rect);
+    el.appendChild(lbl);
+    layer.appendChild(el);
+  });
+
+  badges.forEach(b => {
+    if (b.x === undefined || b.y === undefined) {
+      console.warn(`Badge ${b.id} missing x/y coordinates`);
+      return;
+    }
+    const pos = scale(b.x, b.y);
+    const el  = document.createElement("div");
+    el.className  = "badge-dot";
+    el.style.left = pos.x + "px";
+    el.style.top  = pos.y + "px";
+    const star = document.createElement("div");
+    star.className  = "badge-star";
+    star.textContent = "★";
+    const lbl = document.createElement("div");
+    lbl.className  = "badge-label";
+    lbl.textContent = b.label || b.id.slice(-4);
+    el.appendChild(star);
+    el.appendChild(lbl);
+    layer.appendChild(el);
+  });
+
+  document.getElementById("badge-count").textContent =
+    badges.length + " badge" + (badges.length !== 1 ? "s" : "");
+}
+
+document.getElementById("map-root").addEventListener("click", e => {
+  const root = document.getElementById("map-root");
+  const rect  = root.getBoundingClientRect();
+  const px = Math.round((e.clientX - rect.left) / root.clientWidth  * naturalW);
+  const py = Math.round((e.clientY - rect.top)  / root.clientHeight * naturalH);
+  const tip = document.getElementById("coord-tip");
+  tip.textContent = "x: " + px + ", y: " + py;
+  tip.style.left   = (e.clientX + 12) + "px";
+  tip.style.top    = (e.clientY - 10) + "px";
+  tip.style.display = "block";
+  navigator.clipboard?.writeText(JSON.stringify({x:px,y:py})).catch(()=>{});
+  setTimeout(() => { tip.style.display = "none"; }, 2500);
+});
+
+function connect() {
+  const dot = document.getElementById("live-dot");
+  const lbl = document.getElementById("live-label");
+  const es  = new EventSource("/events");
+  es.onopen = () => { dot.classList.add("on"); lbl.textContent = "live"; };
+  es.onmessage = e => {
+    try {
+      const msg = JSON.parse(e.data);
+      if (msg.type === "badges") { badges = msg.data; render(); }
+    } catch(err) { console.error("[sse]", err); }
+  };
+  es.onerror = () => { dot.classList.remove("on"); lbl.textContent = "disconnected – retrying…"; };
+}
+
+connect();
+</script>
+</body>
+</html>
