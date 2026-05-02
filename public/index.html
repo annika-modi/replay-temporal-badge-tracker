@@ -8,13 +8,14 @@
 body { background: #080a12; width: 100vw; height: 100vh; overflow: hidden; font-family: "SF Mono", monospace; }
 #statusbar { position: fixed; top: 0; left: 0; right: 0; height: 38px; background: rgba(8,10,18,0.95); backdrop-filter: blur(10px); border-bottom: 1px solid #1a1d2e; display: flex; align-items: center; gap: 14px; padding: 0 18px; z-index: 100; font-size: 11px; }
 .title { font-size: 12px; font-weight: bold; letter-spacing: .12em; text-transform: uppercase; background: linear-gradient(90deg, #e8c87a, #f5e6b0, #e8c87a); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
-.subtitle { color: #2a3050; font-size: 11px; }
 #live-dot { width: 7px; height: 7px; border-radius: 50%; background: #ff4444; transition: all .3s; }
 #live-dot.on { background: #4dfa90; box-shadow: 0 0 6px #4dfa90; }
 #live-label { font-size: 11px; color: #404870; }
 .spacer { flex: 1; }
 #badge-count { font-size: 11px; color: #e8c87a; }
 #table-count { font-size: 11px; color: #2a3860; }
+.floor-btn { background: rgba(40,50,100,0.5); border: 1px solid rgba(100,120,220,0.4); color: #7090ff; padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 11px; font-family: "SF Mono", monospace; }
+.floor-btn.active { background: rgba(100,120,220,0.4); color: #fff; }
 #map-wrap { position: fixed; top: 38px; left: 0; right: 0; bottom: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; background: #080a12; }
 #map-root { position: relative; }
 #map-root img { display: block; width: 100%; height: 100%; user-select: none; pointer-events: none; opacity: 0.85; }
@@ -37,11 +38,12 @@ body { background: #080a12; width: 100vw; height: 100vh; overflow: hidden; font-
 
 <div id="statusbar">
   <span class="title">★ Replay</span>
-  <span class="subtitle">Moscone South · Level 00</span>
+  <button class="floor-btn active" id="btn-level00" onclick="switchFloor('level00')">Level 00</button>
+  <button class="floor-btn" id="btn-concourse" onclick="switchFloor('concourse')">Concourse</button>
   <div id="live-dot"></div>
   <span id="live-label">connecting…</span>
   <div class="spacer"></div>
-  <span id="table-count">17 tables</span>
+  <span id="table-count">0 tables</span>
   <span id="badge-count">0 badges</span>
 </div>
 
@@ -60,36 +62,65 @@ body { background: #080a12; width: 100vw; height: 100vh; overflow: hidden; font-
 <div id="coord-tip"></div>
 
 <script>
-const TABLES = [
-  { id: "table-1",  x: 923,  y: 454  },
-  { id: "table-2",  x: 923,  y: 656  },
-  { id: "table-3",  x: 923,  y: 732  },
-  { id: "table-4",  x: 753,  y: 451  },
-  { id: "table-5",  x: 753,  y: 530  },
-  { id: "table-6",  x: 753,  y: 656  },
-  { id: "table-7",  x: 753,  y: 727  },
-  { id: "table-8",  x: 923,  y: 1026 },
-  { id: "table-9",  x: 923,  y: 1100 },
-  { id: "table-10", x: 923,  y: 1158 },
-  { id: "table-11", x: 923,  y: 1214 },
-  { id: "table-12", x: 923,  y: 1287 },
-  { id: "table-13", x: 855,  y: 1287 },
-  { id: "table-14", x: 923,  y: 1320 },
-  { id: "table-15", x: 1091, y: 1026 },
-  { id: "table-16", x: 1091, y: 1097 },
-  { id: "table-17", x: 1091, y: 1156 },
-];
+// ── Floor config ──────────────────────────────────────────────────────────────
+// Grid is 200 x 100 units for both floors.
+// Click anywhere on the map to get coordinates in this space.
+// Update table x/y values here after clicking positions on each floor.
 
+const FLOORS = {
+  "level00": {
+    name: "Level 00",
+    map: "/map-level00.PNG",
+    tables: [
+      // TODO: re-click all table positions on Level 00 map to get 200x100 coords
+      { id: "table-1",  x: 46,  y: 45  },
+      { id: "table-2",  x: 46,  y: 65  },
+      { id: "table-3",  x: 46,  y: 73  },
+      { id: "table-4",  x: 37,  y: 45  },
+      { id: "table-5",  x: 37,  y: 53  },
+      { id: "table-6",  x: 37,  y: 65  },
+      { id: "table-7",  x: 37,  y: 72  },
+      { id: "table-8",  x: 46,  y: 102 },
+      { id: "table-9",  x: 46,  y: 110 },
+      { id: "table-10", x: 46,  y: 115 },
+      { id: "table-11", x: 46,  y: 121 },
+      { id: "table-12", x: 46,  y: 128 },
+      { id: "table-13", x: 42,  y: 128 },
+      { id: "table-14", x: 46,  y: 132 },
+      { id: "table-15", x: 54,  y: 102 },
+      { id: "table-16", x: 54,  y: 109 },
+      { id: "table-17", x: 54,  y: 115 },
+    ]
+  },
+  "concourse": {
+    name: "Concourse",
+    map: "/map-concourse.PNG",
+    tables: [
+      // TODO: click table positions on Concourse map and add them here
+    ]
+  }
+};
+
+// ── State ─────────────────────────────────────────────────────────────────────
+let currentFloor = "level00";
 let badges = [];
 let naturalW = 0, naturalH = 0;
 
+// ── Map loading ───────────────────────────────────────────────────────────────
 const mapImg = document.getElementById("mapimg");
-mapImg.src = "http://localhost:5000/map.png";
+
+function loadFloorMap(floorId) {
+  naturalW = 0;
+  naturalH = 0;
+  mapImg.src = FLOORS[floorId].map;
+}
+
 mapImg.onload = () => {
   naturalW = mapImg.naturalWidth;
   naturalH = mapImg.naturalHeight;
   fitMap();
 };
+
 window.addEventListener("resize", () => { fitMap(); render(); });
 
 function fitMap() {
@@ -105,20 +136,34 @@ function fitMap() {
   render();
 }
 
+// ── Floor switching ───────────────────────────────────────────────────────────
+function switchFloor(floorId) {
+  currentFloor = floorId;
+  badges = [];
+  loadFloorMap(floorId);
+  document.querySelectorAll('.floor-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('btn-' + floorId).classList.add('active');
+  render();
+}
+
+// ── Coordinate scaling (200 x 100 grid) ──────────────────────────────────────
 function scale(px, py) {
   const root = document.getElementById("map-root");
   return {
-    x: px / naturalW * root.clientWidth,
-    y: py / naturalH * root.clientHeight
+    x: px / 200 * root.clientWidth,
+    y: py / 100 * root.clientHeight
   };
 }
 
+// ── Render ────────────────────────────────────────────────────────────────────
 function render() {
   if (!naturalW) return;
   const layer = document.getElementById("dot-layer");
   layer.innerHTML = "";
 
-  TABLES.forEach(t => {
+  const tables = FLOORS[currentFloor].tables;
+
+  tables.forEach(t => {
     const pos = scale(t.x, t.y);
     const el  = document.createElement("div");
     el.className  = "table-marker";
@@ -127,52 +172,59 @@ function render() {
     const rect = document.createElement("div");
     rect.className = "table-rect";
     const lbl = document.createElement("div");
-    lbl.className  = "table-label";
+    lbl.className   = "table-label";
     lbl.textContent = t.id;
     el.appendChild(rect);
     el.appendChild(lbl);
     layer.appendChild(el);
   });
 
-  badges.forEach(b => {
-    if (b.x === undefined || b.y === undefined) {
-      console.warn(`Badge ${b.id} missing x/y coordinates`);
-      return;
-    }
-    const pos = scale(b.x, b.y);
-    const el  = document.createElement("div");
-    el.className  = "badge-dot";
-    el.style.left = pos.x + "px";
-    el.style.top  = pos.y + "px";
-    const star = document.createElement("div");
-    star.className  = "badge-star";
-    star.textContent = "★";
-    const lbl = document.createElement("div");
-    lbl.className  = "badge-label";
-    lbl.textContent = b.label || b.id.slice(-4);
-    el.appendChild(star);
-    el.appendChild(lbl);
-    layer.appendChild(el);
-  });
+  // Only show badges on the current floor
+  badges
+    .filter(b => !b.floor || b.floor === currentFloor)
+    .forEach(b => {
+      if (b.x === undefined || b.y === undefined) {
+        console.warn(`Badge ${b.id} missing x/y coordinates`);
+        return;
+      }
+      const pos = scale(b.x, b.y);
+      const el  = document.createElement("div");
+      el.className  = "badge-dot";
+      el.style.left = pos.x + "px";
+      el.style.top  = pos.y + "px";
+      const star = document.createElement("div");
+      star.className   = "badge-star";
+      star.textContent = "★";
+      const lbl = document.createElement("div");
+      lbl.className   = "badge-label";
+      lbl.textContent = b.label || b.id.slice(-4);
+      el.appendChild(star);
+      el.appendChild(lbl);
+      layer.appendChild(el);
+    });
 
+  document.getElementById("table-count").textContent = tables.length + " tables";
   document.getElementById("badge-count").textContent =
     badges.length + " badge" + (badges.length !== 1 ? "s" : "");
 }
 
+// ── Click to get coordinates ──────────────────────────────────────────────────
 document.getElementById("map-root").addEventListener("click", e => {
   const root = document.getElementById("map-root");
   const rect  = root.getBoundingClientRect();
-  const px = Math.round((e.clientX - rect.left) / root.clientWidth  * naturalW);
-  const py = Math.round((e.clientY - rect.top)  / root.clientHeight * naturalH);
+  // Returns coordinates in 200x100 grid space
+  const px = ((e.clientX - rect.left) / root.clientWidth  * 200).toFixed(1);
+  const py = ((e.clientY - rect.top)  / root.clientHeight * 100).toFixed(1);
   const tip = document.getElementById("coord-tip");
   tip.textContent = "x: " + px + ", y: " + py;
-  tip.style.left   = (e.clientX + 12) + "px";
-  tip.style.top    = (e.clientY - 10) + "px";
+  tip.style.left    = (e.clientX + 12) + "px";
+  tip.style.top     = (e.clientY - 10) + "px";
   tip.style.display = "block";
-  navigator.clipboard?.writeText(JSON.stringify({x:px,y:py})).catch(()=>{});
+  navigator.clipboard?.writeText(JSON.stringify({x: parseFloat(px), y: parseFloat(py)})).catch(()=>{});
   setTimeout(() => { tip.style.display = "none"; }, 2500);
 });
 
+// ── SSE connection ────────────────────────────────────────────────────────────
 function connect() {
   const dot = document.getElementById("live-dot");
   const lbl = document.getElementById("live-label");
@@ -187,6 +239,8 @@ function connect() {
   es.onerror = () => { dot.classList.remove("on"); lbl.textContent = "disconnected – retrying…"; };
 }
 
+// ── Init ──────────────────────────────────────────────────────────────────────
+loadFloorMap(currentFloor);
 connect();
 </script>
 </body>

@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Replay – Table Admin</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: #080a12; min-height: 100vh; font-family: "SF Mono", monospace; color: #c8d0f0; padding: 24px; }
+
+header { display: flex; align-items: center; gap: 12px; margin-bottom: 32px; padding-bottom: 16px; border-bottom: 1px solid #1a1d2e; }
+.title { font-size: 13px; font-weight: bold; letter-spacing: .12em; text-transform: uppercase; background: linear-gradient(90deg, #e8c87a, #f5e6b0, #e8c87a); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+.subtitle { font-size: 11px; color: #2a3050; }
+
+.card { background: rgba(255,255,255,0.03); border: 1px solid #1a1d2e; border-radius: 8px; padding: 20px; margin-bottom: 20px; }
+.card-title { font-size: 11px; text-transform: uppercase; letter-spacing: .1em; color: #404870; margin-bottom: 16px; }
+
+/* Register form */
+.form-row { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
+.field { display: flex; flex-direction: column; gap: 6px; flex: 1; min-width: 160px; }
+label { font-size: 10px; text-transform: uppercase; letter-spacing: .08em; color: #404870; }
+input, select {
+  background: rgba(255,255,255,0.05);
+  border: 1px solid #1a1d2e;
+  border-radius: 4px;
+  color: #c8d0f0;
+  font-family: "SF Mono", monospace;
+  font-size: 12px;
+  padding: 8px 12px;
+  outline: none;
+  transition: border-color .2s;
+}
+input:focus, select:focus { border-color: rgba(100,120,220,0.6); }
+input::placeholder { color: #2a3050; }
+select option { background: #0d0f1e; }
+
+.btn { padding: 8px 20px; border-radius: 4px; border: none; font-family: "SF Mono", monospace; font-size: 11px; cursor: pointer; transition: all .2s; white-space: nowrap; }
+.btn-primary { background: rgba(100,120,220,0.3); border: 1px solid rgba(100,120,220,0.5); color: #a0b0ff; }
+.btn-primary:hover { background: rgba(100,120,220,0.5); color: #fff; }
+.btn-danger { background: rgba(220,60,60,0.2); border: 1px solid rgba(220,60,60,0.3); color: #ff8080; font-size: 10px; padding: 4px 10px; }
+.btn-danger:hover { background: rgba(220,60,60,0.4); }
+
+/* Status message */
+#status { font-size: 11px; margin-top: 10px; padding: 8px 12px; border-radius: 4px; display: none; }
+#status.ok  { background: rgba(77,250,144,0.1); border: 1px solid rgba(77,250,144,0.3); color: #4dfa90; }
+#status.err { background: rgba(255,80,80,0.1);  border: 1px solid rgba(255,80,80,0.3);  color: #ff8080; }
+
+/* Table list */
+#table-list { width: 100%; border-collapse: collapse; font-size: 11px; }
+#table-list th { text-align: left; padding: 6px 10px; color: #404870; font-size: 10px; text-transform: uppercase; letter-spacing: .08em; border-bottom: 1px solid #1a1d2e; }
+#table-list td { padding: 8px 10px; border-bottom: 1px solid rgba(26,29,46,0.5); vertical-align: middle; }
+#table-list tr:last-child td { border-bottom: none; }
+.mac-registered { color: #4dfa90; }
+.mac-empty { color: #2a3050; font-style: italic; }
+.floor-badge { font-size: 9px; padding: 2px 6px; border-radius: 3px; background: rgba(40,50,100,0.5); border: 1px solid rgba(100,120,220,0.3); color: #7090ff; }
+
+/* Stats */
+.stats { display: flex; gap: 20px; }
+.stat { display: flex; flex-direction: column; gap: 4px; }
+.stat-val { font-size: 22px; color: #e8c87a; }
+.stat-lbl { font-size: 10px; color: #404870; text-transform: uppercase; letter-spacing: .08em; }
+
+.search-row { display: flex; gap: 10px; margin-bottom: 16px; }
+#search { flex: 1; }
+</style>
+</head>
+<body>
+
+<header>
+  <span class="title">★ Replay</span>
+  <span class="subtitle">Table Admin · Event Day Setup</span>
+</header>
+
+<!-- Stats -->
+<div class="card">
+  <div class="card-title">Registration Status</div>
+  <div class="stats">
+    <div class="stat">
+      <span class="stat-val" id="stat-total">—</span>
+      <span class="stat-lbl">Total Tables</span>
+    </div>
+    <div class="stat">
+      <span class="stat-val" id="stat-registered">—</span>
+      <span class="stat-lbl">Registered</span>
+    </div>
+    <div class="stat">
+      <span class="stat-val" id="stat-pending">—</span>
+      <span class="stat-lbl">Pending</span>
+    </div>
+  </div>
+</div>
+
+<!-- Register form -->
+<div class="card">
+  <div class="card-title">Register a Table</div>
+  <div class="form-row">
+    <div class="field">
+      <label>MAC Address</label>
+      <input id="mac-input" type="text" placeholder="FF:FF:FF:0F:03:0A" maxlength="17" />
+    </div>
+    <div class="field">
+      <label>Table</label>
+      <select id="table-select">
+        <option value="">Select table...</option>
+      </select>
+    </div>
+    <button class="btn btn-primary" onclick="registerTable()">Register</button>
+  </div>
+  <div id="status"></div>
+</div>
+
+<!-- Table list -->
+<div class="card">
+  <div class="card-title">All Tables</div>
+  <div class="search-row">
+    <input id="search" type="text" placeholder="Search table or MAC..." oninput="filterTables()" />
+  </div>
+  <table id="table-list">
+    <thead>
+      <tr>
+        <th>Table</th>
+        <th>Floor</th>
+        <th>Position (x, y)</th>
+        <th>MAC Address</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody id="table-body"></tbody>
+  </table>
+</div>
+
+<script>
+let allTables = [];
+
+async function loadTables() {
+  const res  = await fetch('/tables');
+  allTables  = await res.json();
+  renderTables(allTables);
+  updateStats(allTables);
+  populateSelect(allTables);
+}
+
+function populateSelect(tables) {
+  const sel = document.getElementById('table-select');
+  sel.innerHTML = '<option value="">Select table...</option>';
+  tables.forEach(t => {
+    const opt = document.createElement('option');
+    opt.value       = t.table;
+    opt.textContent = `${t.table} (${t.floor})${t.mac ? ' ✓' : ''}`;
+    sel.appendChild(opt);
+  });
+}
+
+function renderTables(tables) {
+  const tbody = document.getElementById('table-body');
+  tbody.innerHTML = '';
+  tables.forEach(t => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${t.table}</td>
+      <td><span class="floor-badge">${t.floor}</span></td>
+      <td>${t.x}, ${t.y}</td>
+      <td class="${t.mac ? 'mac-registered' : 'mac-empty'}">${t.mac || 'not registered'}</td>
+      <td>${t.mac ? `<button class="btn btn-danger" onclick="unregister('${t.mac}')">Remove</button>` : ''}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+function updateStats(tables) {
+  const registered = tables.filter(t => t.mac).length;
+  document.getElementById('stat-total').textContent      = tables.length;
+  document.getElementById('stat-registered').textContent = registered;
+  document.getElementById('stat-pending').textContent    = tables.length - registered;
+}
+
+function filterTables() {
+  const q = document.getElementById('search').value.toLowerCase();
+  const filtered = allTables.filter(t =>
+    t.table.toLowerCase().includes(q) ||
+    (t.mac && t.mac.toLowerCase().includes(q)) ||
+    t.floor.toLowerCase().includes(q)
+  );
+  renderTables(filtered);
+}
+
+async function registerTable() {
+  const mac   = document.getElementById('mac-input').value.trim().toUpperCase();
+  const table = document.getElementById('table-select').value;
+  const status = document.getElementById('status');
+
+  if (!mac || !table) {
+    showStatus('Please enter a MAC address and select a table.', false);
+    return;
+  }
+
+  const res  = await fetch('/register', {
+    method:  'POST',
+    headers: {'Content-Type': 'application/json'},
+    body:    JSON.stringify({mac, table})
+  });
+  const data = await res.json();
+
+  if (data.ok) {
+    showStatus(`Registered ${mac} → ${table}`, true);
+    document.getElementById('mac-input').value = '';
+    document.getElementById('table-select').value = '';
+    loadTables();
+  } else {
+    showStatus(data.error || 'Registration failed', false);
+  }
+}
+
+async function unregister(mac) {
+  const res  = await fetch('/register', {
+    method:  'DELETE',
+    headers: {'Content-Type': 'application/json'},
+    body:    JSON.stringify({mac})
+  });
+  const data = await res.json();
+  if (data.ok) {
+    showStatus(`Removed ${mac}`, true);
+    loadTables();
+  }
+}
+
+function showStatus(msg, ok) {
+  const el = document.getElementById('status');
+  el.textContent   = msg;
+  el.className     = ok ? 'ok' : 'err';
+  el.style.display = 'block';
+  setTimeout(() => { el.style.display = 'none'; }, 3000);
+}
+
+// Auto-format MAC input as user types
+document.getElementById('mac-input').addEventListener('input', e => {
+  let v = e.target.value.replace(/[^0-9a-fA-F]/g, '').toUpperCase();
+  let formatted = v.match(/.{1,2}/g)?.join(':') || v;
+  if (formatted.length > 17) formatted = formatted.slice(0, 17);
+  e.target.value = formatted;
+});
+
+loadTables();
+</script>
+</body>
+</html>
