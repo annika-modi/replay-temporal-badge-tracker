@@ -440,6 +440,110 @@ def _run_trilateration():
     latest_badges = cluster_badges(all_badges)
     broadcast(latest_badges)
 
+# ── Closest table ─────────────────────────────────────────────────────────────
+
+def get_closest_table(badge_id):
+    """
+    Returns the table a badge is closest to, based on strongest RSSI reading.
+
+    Strongest RSSI (least negative) = physically closest table.
+    This is simpler and often more reliable than trilateration for the
+    "which booth is this person at" question.
+
+    Returns a dict like:
+      {"badge_id": "...", "table": "table-3", "table_uid": 3, "rssi": -67, "floor": "level00"}
+    or None if the badge has no recent readings.
+    """
+    if badge_id not in raw_readings or not raw_readings[badge_id]:
+        return None
+
+    base_stations = get_base_stations()
+    station_by_uid  = {s['uid']:   s for s in base_stations if s['uid'] is not None}
+    station_by_name = {s['table']: s for s in base_stations}
+
+    best_rssi    = -9999
+    best_station = None
+
+    for table_key, (rssi, ts) in raw_readings[badge_id].items():
+        station = (station_by_uid.get(table_key)
+                   if isinstance(table_key, int)
+                   else station_by_name.get(table_key))
+        if station and rssi > best_rssi:
+            best_rssi    = rssi
+            best_station = station
+
+    if not best_station:
+        return None
+
+    return {
+        'badge_id':  badge_id,
+        'table':     best_station['table'],
+        'table_uid': best_station['uid'],
+        'rssi':      best_rssi,
+        'floor':     best_station.get('floor', 'level00'),
+    }
+
+
+def get_all_closest_tables():
+    """
+    Returns closest table for every currently active badge.
+    Used by GET /closest to power the "who is at which booth" view.
+    """
+    results = []
+    for badge_id in raw_readings:
+        entry = get_closest_table(badge_id)
+        if entry:
+            results.append(entry)
+
+    # Sort by table so organizers can see all badges grouped by booth
+    results.sort(key=lambda x: (x['floor'], x['table']))
+    return results
+
+
+# ── GET /closest ──────────────────────────────────────────────────────────────
+
+@app.route('/closest', methods=['GET'])
+def closest():
+    """
+    Returns the closest table for every active badge.
+
+    Optional query params:
+      floor  — filter by floor name (e.g. ?floor=level00)
+      table  — filter by table name (e.g. ?table=table-3)
+
+    Response:
+    [
+      {"badge_id": "c1:9d:...", "table": "table-3", "table_uid": 3, "rssi": -67, "floor": "level00"},
+      ...
+    ]
+    """
+    results = get_all_closest_tables()
+
+    floor_filter = request.args.get('floor')
+    table_filter = request.args.get('table')
+
+    if floor_filter:
+        results = [r for r in results if r['floor'] == floor_filter]
+    if table_filter:
+        results = [r for r in results if r['table'] == table_filter]
+
+    return jsonify(results), 200
+
+
+# ── GET /closest/<badge_id> ───────────────────────────────────────────────────
+
+@app.route('/closest/<path:badge_id>', methods=['GET'])
+def closest_one(badge_id):
+    """
+    Returns the closest table for a single badge.
+
+    Example: GET /closest/c1:9d:4b:22:08:01
+    """
+    entry = get_closest_table(badge_id)
+    if not entry:
+        return jsonify({'error': f'No active readings for badge {badge_id}'}), 404
+    return jsonify(entry), 200
+
 
 # ── Clustering ────────────────────────────────────────────────────────────────
 
