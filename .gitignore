@@ -1,4 +1,16 @@
-venv/
+# Database
+scans.db
+
+# Compiled Python
 __pycache__/
 *.pyc
+*.pyo
+
+# Virtual environment
+venv/
+
+# Binary firmware
+*.bin
+
+# macOS
 .DS_Store

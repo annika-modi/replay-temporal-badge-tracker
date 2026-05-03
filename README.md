@@ -1,18 +1,18 @@
-# Replay Floor Map — Frontend
+# Conference Tracker — BLE Badge Positioning Backend
 
 Live BLE badge tracker for the **Replay by Temporal** conference at Moscone South.  
-Displays real-time badge positions as gold stars on an interactive floor map.
+Receives scan data from ESP32 base stations, trilaterates badge positions, and streams them live to the browser.
 
 ---
 
 ## What It Does
 
-- Renders the Moscone South Level 00 venue floor plan in the browser
-- Receives BLE badge scan data from base stations via `POST /stream`
-- Pushes live updates to the browser instantly using **Server-Sent Events** — no page refresh needed
-- Shows each detected badge as an animated gold ★ labeled with the last 4 chars of its MAC address
-- 17 table/base station positions are hardcoded to the floor plan coordinates 
-- Click anywhere on the map to get the pixel `(x, y)` coordinate (copied to clipboard)
+- Receives BLE scan POSTs from ESP32 base stations (`/enroll` + `/scanreport`)
+- Stores all scan data in a local SQLite database (`scans.db`)
+- Runs trilateration to estimate each badge's (x, y) position on the floor plan
+- Pushes live badge positions to the browser via Server-Sent Events — no polling
+- Serves the frontend map at `http://localhost:5000`
+- Table/base station positions are defined in `tables.json` — not hardcoded
 
 ---
 
@@ -21,9 +21,10 @@ Displays real-time badge positions as gold stars on an interactive floor map.
 | Layer | Technology |
 |---|---|
 | Backend | Python 3, Flask |
-| Live updates | Server-Sent Events (SSE) via Flask streaming `Response` |
-| Frontend | Vanilla HTML / CSS / JS — no framework |
-| Map serving | Flask static files (`public/`) |
+| Positioning | Trilateration via `positioning.py` (numpy) |
+| Database | SQLite (`scans.db`) |
+| Live updates | Server-Sent Events (SSE) |
+| Frontend | Vanilla HTML/CSS/JS (`public/index.html`) |
 
 ---
 
@@ -32,116 +33,129 @@ Displays real-time badge positions as gold stars on an interactive floor map.
 **Requirements:** Python 3, pip
 
 ```bash
+# Clone and enter the repo
+git clone <repo-url>
+cd conference-tracker
+
 # Create and activate virtual environment
 python3 -m venv venv
 source venv/bin/activate       # Mac/Linux
-# venv\Scripts\activate        # Windows
+venv\Scripts\activate          # Windows
 
 # Install dependencies
-pip install flask
+pip install -r requirements.txt
 
-# Run the server
+# Run the server (creates scans.db automatically on first run)
 python server.py
+
+# For a clean test run (wipes scans.db before starting)
+python server.py --fresh
 ```
 
-Open **http://localhost:5000** in your browser.
-
-You should see the floor map with 17 faint table markers and a **"live"** status indicator in the top bar.
+Open **http://localhost:5000** in your browser — you should see the floor map.
 
 ---
 
-## API
+## ESP32 Firmware Endpoints
 
-### `POST /stream`
-Accepts incoming BLE scan data. Call this from the BLE backend whenever a base station detects badges.
+These match the [BLE-Replay-Firmware](https://github.com/your-link-here) spec exactly.
 
-**Request body — array of scan readings:**
+### `POST /enroll`
+Sent once by each ESP32 on boot after connecting to WiFi.
+
 ```json
-[
-  { "mac": "AA:BB:CC:DD:EE:FF", "rssi": -65, "reader_id": "table-1" },
-  { "mac": "11:22:33:44:55:66", "rssi": -72, "reader_id": "table-3" }
-]
+{
+  "mac": "AA:BB:CC:DD:EE:FF",
+  "table_uid": 12
+}
 ```
 
-| Field | Type | Description |
-|---|---|---|
-| `mac` | string | Badge MAC address |
-| `rssi` | number | Signal strength in dBm (e.g. `-65`). Less negative = stronger signal. |
-| `reader_id` | string | Which table/base station detected this badge (e.g. `"table-1"`) |
+### `POST /scanreport`
+Sent every 5 seconds. One batch per ESP32 per scan window.
 
-If the same badge MAC is reported by multiple tables, the server keeps only the reading with the strongest RSSI (least negative).
-
-**Quick test with curl:**
-```bash
-curl -X POST http://localhost:5000/stream \
-     -H "Content-Type: application/json" \
-     -d '[{"mac":"AA:BB:CC:DD:EE:FF","rssi":-65,"reader_id":"table-1"}]'
+```json
+{
+  "table_uid": 12,
+  "timestamp": "2026-05-02T14:23:05Z",
+  "scans": [
+    {
+      "ble_uid": "f7826da6-4fa2-4e98-8024-bc5b71e0893e:100:42",
+      "mac": "c1:9d:4b:22:08:fa",
+      "rssi": -67,
+      "tx_power": -59
+    },
+    {
+      "ble_uid": null,
+      "mac": "5e:a3:11:0c:7d:90",
+      "rssi": -82,
+      "tx_power": null
+    }
+  ]
+}
 ```
 
-A gold ★ should appear near `table-1` on the map instantly.
+`ble_uid` is used as the badge identifier when present (iBeacon UUID:major:minor). Falls back to `mac` if null.
 
 ---
 
-### `GET /events`
-SSE stream — the browser connects here automatically to receive live badge updates. You don't call this manually.
+## Debug Endpoints
+
+| URL | What it shows |
+|---|---|
+| `http://localhost:5000/debug/scans` | Last 100 raw scan rows from SQLite |
+| `http://localhost:5000/debug/enrolled` | All enrolled ESP32s and their table UIDs |
+| `http://localhost:5000/debug/memory` | Current in-memory badge state used for trilateration |
+
+These are the first place to check if badges aren't showing up on the map.
 
 ---
 
-### `DELETE /badges`
-Clears all badges from the map.
+## Table Configuration (`tables.json`)
 
-```bash
-curl -X DELETE http://localhost:5000/badges
+Base station positions are defined in `tables.json` — **not hardcoded**. Each entry maps a table name to its pixel coordinates on the floor plan image and its integer `table_uid` from the firmware.
+
+```json
+{
+  "tables": {
+    "table-1": { "x": 923, "y": 454, "table_uid": 1 },
+    "table-2": { "x": 923, "y": 656, "table_uid": 2 }
+  }
+}
 ```
 
----
-
-## Table Coordinates
-
-17 base station tables are hardcoded in `public/index.html` with their pixel positions on the floor plan:
-
-| ID | x | y |
-|---|---|---|
-| table-1 | 923 | 454 |
-| table-2 | 923 | 656 |
-| table-3 | 923 | 732 |
-| table-4 | 753 | 451 |
-| table-5 | 753 | 530 |
-| table-6 | 753 | 656 |
-| table-7 | 753 | 727 |
-| table-8 | 923 | 1026 |
-| table-9 | 923 | 1100 |
-| table-10 | 923 | 1158 |
-| table-11 | 923 | 1214 |
-| table-12 | 923 | 1287 |
-| table-13 | 855 | 1287 |
-| table-14 | 923 | 1320 |
-| table-15 | 1091 | 1026 |
-| table-16 | 1091 | 1097 |
-| table-17 | 1091 | 1156 |
-
-To find coordinates for new tables, click anywhere on the map while the server is running — the `(x, y)` pixel coordinate pops up and copies to your clipboard.
+To find pixel coordinates for a table: run the server, open `http://localhost:5000`, and click anywhere on the map — the `(x, y)` coordinate is copied to your clipboard.
 
 ---
 
 ## Project Structure
 
 ```
-replay-frontend/
-├── server.py          ← Flask backend — serves page, receives scan data, pushes SSE updates
+conference-tracker/
+├── server.py          ← Flask backend: receives scans, runs trilateration, serves SSE + frontend
+├── positioning.py     ← Trilateration logic (RSSI → distance → x,y)
+├── config.py          ← Shared constants (room dimensions, staleness window, etc.)
+├── fake_data.py       ← Emulator for local testing without hardware
+├── tables.json        ← Base station positions on the floor plan
+├── requirements.txt   ← Python dependencies
 ├── public/
-│   ├── index.html     ← Full-screen map UI with SSE client
-│   └── map.png        ← Venue floor plan image
-└── README.md
+│   ├── index.html     ← Map frontend (SSE client, badge rendering)
+│   ├── admin.html     ← Admin panel
+│   └── *.PNG          ← Floor plan images
+└── scans.db           ← SQLite database (auto-created, gitignored)
 ```
 
 ---
 
-## Part of a Larger System
+## Running Without Hardware (Emulator)
 
-This repo is the frontend layer. It is designed to sit downstream of a BLE trilateration backend that:
-1. Receives raw scan data from ESP32 base stations (one per table)
-2. Calculates badge `(x, y)` positions via RSSI trilateration across 3+ base stations
-3. Calls `POST /stream` on this server with the computed badge positions
+To test the full pipeline locally without any ESP32s:
 
-The backend repo will be linked here once available.
+```bash
+# Terminal 1 — start the server
+python server.py --fresh
+
+# Terminal 2 — run the emulator (sends fake scan data)
+python fake_data.py
+```
+
+Open `http://localhost:5000` — badges should appear and move on the map.

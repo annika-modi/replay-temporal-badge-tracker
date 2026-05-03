@@ -276,7 +276,7 @@ def enroll():
     if 'uid_registry' not in tables_cfg:
         tables_cfg['uid_registry'] = {}
     if uid_str not in tables_cfg['uid_registry']:
-        # Auto-placeholder — Alex or admin can rename to real table later
+        # Auto-placeholder — update uid_registry in tables.json to assign a real table position
         placeholder = f'table-uid-{table_uid}'
         tables_cfg['uid_registry'][uid_str] = placeholder
         save_tables(tables_cfg)
@@ -550,12 +550,12 @@ if __name__ == '__main__':
         local_ip = '127.0.0.1'
 
     PORT = 5000
-    print(f'\n✅  Replay Map     →  http://localhost:{PORT}')
-    print(f'    On network    →  http://{local_ip}:{PORT}')
-    print(f'📡  ESP32 enroll  →  POST http://{local_ip}:{PORT}/enroll')
-    print(f'📡  ESP32 scan    →  POST http://{local_ip}:{PORT}/scanreport')
-    print(f'🔍  Debug scans   →  http://localhost:{PORT}/debug/scans')
-    print(f'🔍  Debug memory  →  http://localhost:{PORT}/debug/memory')
-    print(f'🔍  Enrolled      →  http://localhost:{PORT}/debug/enrolled\n')
+    print(f'\n  Replay Map    →  http://localhost:{PORT}')
+    print(f'  On network    →  http://{local_ip}:{PORT}')
+    print(f'  ESP32 enroll  →  POST http://{local_ip}:{PORT}/enroll')
+    print(f'  ESP32 scan    →  POST http://{local_ip}:{PORT}/scanreport')
+    print(f'  Debug scans   →  http://localhost:{PORT}/debug/scans')
+    print(f'  Debug memory  →  http://localhost:{PORT}/debug/memory')
+    print(f'  Enrolled      →  http://localhost:{PORT}/debug/enrolled\n')
 
     app.run(host='0.0.0.0', port=PORT, debug=False, use_reloader=False, threaded=True)

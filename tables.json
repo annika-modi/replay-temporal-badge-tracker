@@ -21,6 +21,28 @@
     "table-19": {"x": 50,  "y": 60,  "floor": "concourse"},
     "table-20": {"x": 90,  "y": 60,  "floor": "concourse"}
   },
+  "uid_registry": {
+    "1":  "table-1",
+    "2":  "table-2",
+    "3":  "table-3",
+    "4":  "table-4",
+    "5":  "table-5",
+    "6":  "table-6",
+    "7":  "table-7",
+    "8":  "table-8",
+    "9":  "table-9",
+    "10": "table-10",
+    "11": "table-11",
+    "12": "table-12",
+    "13": "table-13",
+    "14": "table-14",
+    "15": "table-15",
+    "16": "table-16",
+    "17": "table-17",
+    "18": "table-18",
+    "19": "table-19",
+    "20": "table-20"
+  },
   "mac_registry": {
     "FF:FF:FF:0F:04:0A": "table-1",
     "FF:FF:FF:0F:04:0E": "table-2",
