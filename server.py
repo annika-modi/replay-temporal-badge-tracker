@@ -28,6 +28,7 @@ DEBUG:
 from flask import Flask, request, jsonify, Response, stream_with_context
 from positioning import locate_all_badges
 import json, socket, queue, threading, time, os, sqlite3, argparse
+import requests
 
 app = Flask(__name__, static_folder='public', static_url_path='')
 
@@ -42,6 +43,19 @@ STALE_SECONDS = 15  # ignore readings older than this for trilateration
 
 DB_PATH     = 'scans.db'
 TABLES_PATH = 'tables.json'
+
+# ── brooklyn.party device registry ────────────────────────────────────────────
+# Pollled on a background thread; each entry is whatever the upstream returns
+# (mac_address, loc, created_at, updated_at, x, y).
+BROOKLYN_BASE       = 'https://brooklyn.party'
+BROOKLYN_ENDPOINT   = '/api/v1/devices'
+BROOKLYN_POLL_SECS  = 5    # how often the background thread refreshes
+BROOKLYN_TIMEOUT    = 4
+
+brooklyn_devices       = []      # list of dicts from upstream
+brooklyn_last_fetch    = None    # epoch seconds of last successful fetch
+brooklyn_last_error    = None
+brooklyn_lock          = threading.Lock()
 
 
 # ── SQLite ────────────────────────────────────────────────────────────────────
@@ -576,21 +590,96 @@ def broadcast(badges):
             q.put(badges)
 
 
+# ── brooklyn.party poller ─────────────────────────────────────────────────────
+
+def _fetch_brooklyn_once():
+    """One GET against brooklyn.party. Caller already inside the thread loop."""
+    global brooklyn_devices, brooklyn_last_fetch, brooklyn_last_error
+    url = BROOKLYN_BASE + BROOKLYN_ENDPOINT
+    try:
+        r = requests.get(url, timeout=BROOKLYN_TIMEOUT)
+        r.raise_for_status()
+        payload = r.json()
+        # Schema: {"devices": [{mac_address, loc, created_at, updated_at, x, y}, ...]}
+        devices = payload.get('devices', payload) if isinstance(payload, dict) else payload
+        if not isinstance(devices, list):
+            raise ValueError(f'unexpected payload shape: {type(devices).__name__}')
+        with brooklyn_lock:
+            brooklyn_devices    = devices
+            brooklyn_last_fetch = time.time()
+            brooklyn_last_error = None
+        print(f'[brooklyn] {len(devices)} device(s) registered')
+    except Exception as e:
+        with brooklyn_lock:
+            brooklyn_last_error = str(e)
+        print(f'[brooklyn] fetch failed: {e}')
+
+
+def _brooklyn_loop():
+    while True:
+        _fetch_brooklyn_once()
+        time.sleep(BROOKLYN_POLL_SECS)
+
+
+def start_brooklyn_poller():
+    t = threading.Thread(target=_brooklyn_loop, daemon=True, name='brooklyn-poller')
+    t.start()
+    print(f'[brooklyn] poller started '
+          f'(every {BROOKLYN_POLL_SECS}s -> {BROOKLYN_BASE}{BROOKLYN_ENDPOINT})')
+
+
+# ── GET /devices  (cached brooklyn.party snapshot) ────────────────────────────
+
+@app.route('/devices')
+def get_devices_route():
+    """
+    Returns the most recent snapshot of brooklyn.party's device list along
+    with the freshness of that snapshot.
+    """
+    with brooklyn_lock:
+        return jsonify({
+            'fetched_at': brooklyn_last_fetch,
+            'age_s':      (time.time() - brooklyn_last_fetch) if brooklyn_last_fetch else None,
+            'error':      brooklyn_last_error,
+            'devices':    list(brooklyn_devices),
+        })
+
+
 # ── Admin endpoints ───────────────────────────────────────────────────────────
 
 @app.route('/tables')
 def get_tables_route():
+    """
+    Hardcoded table positions from tables.json, joined with brooklyn.party
+    registration info (matched by loc == table_uid).
+    """
     cfg     = load_tables()
     uid_map = cfg.get('uid_registry', {})
-    result  = []
+
+    # Build loc -> brooklyn record lookup
+    with brooklyn_lock:
+        bk_by_loc = {}
+        for d in brooklyn_devices:
+            try:
+                bk_by_loc[int(d.get('loc'))] = d
+            except (TypeError, ValueError):
+                continue
+
+    result = []
     for table_name, pos in cfg['floor_plan'].items():
-        uid = next((k for k, v in uid_map.items() if v == table_name), None)
+        uid_str = next((k for k, v in uid_map.items() if v == table_name), None)
+        uid_int = int(uid_str) if uid_str is not None else None
+        bk = bk_by_loc.get(uid_int) if uid_int is not None else None
         result.append({
-            'table': table_name,
-            'x':     pos['x'],
-            'y':     pos['y'],
-            'floor': pos.get('floor', 'level00'),
-            'uid':   uid or ''
+            'table':       table_name,
+            'x':           pos['x'],
+            'y':           pos['y'],
+            'floor':       pos.get('floor', 'level00'),
+            'uid':         uid_str or '',
+            'registered':  bk is not None,
+            'mac_address': bk.get('mac_address') if bk else None,
+            'updated_at':  bk.get('updated_at')  if bk else None,
+            'created_at':  bk.get('created_at')  if bk else None,
         })
     return jsonify(result)
 
@@ -644,6 +733,7 @@ if __name__ == '__main__':
 
     init_db()
     raw_readings = load_recent_scans_from_db()
+    start_brooklyn_poller()
 
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -660,6 +750,8 @@ if __name__ == '__main__':
     print(f'  ESP32 scan    →  POST http://{local_ip}:{PORT}/scanreport')
     print(f'  Debug scans   →  http://localhost:{PORT}/debug/scans')
     print(f'  Debug memory  →  http://localhost:{PORT}/debug/memory')
-    print(f'  Enrolled      →  http://localhost:{PORT}/debug/enrolled\n')
+    print(f'  Enrolled      →  http://localhost:{PORT}/debug/enrolled')
+    print(f'  Brooklyn      →  http://localhost:{PORT}/devices')
+    print(f'  Tables (live) →  http://localhost:{PORT}/tables\n')
 
     app.run(host='0.0.0.0', port=PORT, debug=False, use_reloader=False, threaded=True)
