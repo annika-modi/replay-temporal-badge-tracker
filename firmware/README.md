@@ -2,6 +2,79 @@
 
 Firmware for Seeed XIAO ESP32S3. Periodically scans BLE and POSTs results to a server.
 
+## Build & Flash
+
+**Board:** `esp32:esp32:XIAO_ESP32S3` (Arduino-ESP32 core 3.x)
+**Library:** ArduinoJson 7.x
+
+One-time setup:
+
+```bash
+arduino-cli core update-index --additional-urls https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
+arduino-cli core install esp32:esp32 --additional-urls https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
+arduino-cli lib install "ArduinoJson"
+```
+
+### Compile
+
+`arduino-cli` requires the sketch directory name to match the `.ino` filename, so we stage the sketch into a properly-named dir before compiling:
+
+```bash
+# from the repo root
+STAGE=$(mktemp -d)/Beacon-Firmware
+mkdir -p "$STAGE" && cp firmware/Beacon-Firmware.ino "$STAGE/"
+arduino-cli compile \
+  --fqbn esp32:esp32:XIAO_ESP32S3 \
+  --output-dir firmware/build \
+  "$STAGE"
+```
+
+Artifacts land in [firmware/build/](build/).
+
+### Upload (arduino-cli)
+
+Plug the badge in. On Linux it enumerates as `/dev/ttyACM0` (macOS: `/dev/cu.usbmodem*`, Windows: `COMx`). Confirm with `arduino-cli board list`.
+
+```bash
+arduino-cli upload \
+  -p /dev/ttyACM0 \
+  --fqbn esp32:esp32:XIAO_ESP32S3 \
+  --input-dir firmware/build \
+  "$STAGE"
+```
+
+If the board is stuck and won't enumerate, hold **BOOT**, tap **RESET**, release **BOOT** to force download mode, then re-run.
+
+### Flash a pre-built binary (esptool)
+
+For a clean reflash with no toolchain installed, use the merged image at [build/Beacon-Firmware.ino.merged.bin](build/Beacon-Firmware.ino.merged.bin) — it bundles bootloader + partition table + app and flashes at offset `0x0`:
+
+```bash
+esptool.py --chip esp32s3 --port /dev/ttyACM0 --baud 921600 \
+  write_flash -z 0x0 firmware/build/Beacon-Firmware.ino.merged.bin
+```
+
+Or flash the three-part split (matches what `arduino-cli upload` does internally):
+
+```bash
+esptool.py --chip esp32s3 --port /dev/ttyACM0 --baud 921600 \
+  write_flash -z \
+  0x0      firmware/build/Beacon-Firmware.ino.bootloader.bin \
+  0x8000   firmware/build/Beacon-Firmware.ino.partitions.bin \
+  0x10000  firmware/build/Beacon-Firmware.ino.bin
+```
+
+### Published binaries
+
+Built against Arduino-ESP32 core 3.1.3, ArduinoJson 7.4.2, default XIAO_ESP32S3 board options (8 MB flash, default 3 MB APP / 1.5 MB SPIFFS partition scheme, hwcdc on boot, 240 MHz, QIO @ 80 MHz):
+
+| File | Offset | Purpose |
+|------|--------|---------|
+| [Beacon-Firmware.ino.merged.bin](build/Beacon-Firmware.ino.merged.bin) | `0x0` | Full 8 MB image — single-shot flash |
+| [Beacon-Firmware.ino.bootloader.bin](build/Beacon-Firmware.ino.bootloader.bin) | `0x0` | 2nd-stage bootloader |
+| [Beacon-Firmware.ino.partitions.bin](build/Beacon-Firmware.ino.partitions.bin) | `0x8000` | Partition table |
+| [Beacon-Firmware.ino.bin](build/Beacon-Firmware.ino.bin) | `0x10000` | Application image |
+
 ## Endpoints
 
 ### `POST /enroll`
